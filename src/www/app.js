@@ -2073,18 +2073,28 @@
     let sessId = null;
     let es = null;
     const enc = new TextEncoder();
+    const state = { term, fit, es: null, sessId: null, name, ro: null };
+    S.term = state;
+    term.writeln('\x1b[90m正在连接终端…\x1b[0m');
 
     try {
       const r = await req('containers/' + encodeURIComponent(name) + '/terminal', { method: 'POST' });
       sessId = r.id;
+      if (S.term !== state) {
+        fetch(api('term/' + sessId), { method: 'DELETE' }).catch(() => { });
+        return;
+      }
+      state.sessId = sessId;
     } catch (e) {
+      if (S.term !== state) return;
       term.writeln('\r\n\x1b[31m无法打开终端：' + e.message + '\x1b[0m');
       term.writeln('\x1b[90m请确认容器处于运行状态。\x1b[0m');
-      S.term = { term, fit, es: null, sessId: null, name };
       return;
     }
 
     es = new EventSource(api('term/' + sessId + '/stream'));
+    state.es = es;
+    es.onopen = () => term.write('\x1b[2J\x1b[H');
     es.onmessage = (ev) => {
       try {
         const o = JSON.parse(ev.data);
@@ -2096,8 +2106,13 @@
       } catch (_) { /* ignore */ }
     };
     es.addEventListener('end', () => {
+      es.close();
       term.writeln('\r\n\x1b[90m[会话已结束]\x1b[0m');
     });
+    es.onerror = () => {
+      es.close();
+      term.writeln('\r\n\x1b[31m终端连接中断，请关闭后重新打开。\x1b[0m');
+    };
 
     term.onData((data) => {
       if (!sessId) return;
@@ -2125,9 +2140,8 @@
     };
     const ro = new ResizeObserver(() => doResize());
     ro.observe($('#termHost'));
-    setTimeout(doResize, 120);
-
-    S.term = { term, fit, es, sessId, name, ro };
+    state.ro = ro;
+    setTimeout(() => { if (S.term === state) doResize(); }, 120);
   }
 
   function closeTerm(silent) {
