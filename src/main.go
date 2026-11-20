@@ -25,7 +25,7 @@ var wwwFS embed.FS
 
 const appName = "LXCPanel"
 
-var appVersion = "1.0.13"
+var appVersion = "1.0.14"
 
 // Config is persisted in ${TRIM_PKGVAR}/config.json
 type Config struct {

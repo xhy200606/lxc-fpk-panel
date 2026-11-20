@@ -4,7 +4,7 @@
 [![Go](https://img.shields.io/badge/Go-1.21%2B-00ADD8.svg?logo=go&logoColor=white)](src/go.mod)
 [![Go deps](https://img.shields.io/badge/Go%20dependencies-0-brightgreen.svg)](src/go.mod)
 [![Platform](https://img.shields.io/badge/platform-fnOS%20%C2%B7%20Debian-00A9E0.svg)](https://www.fnnas.com/)
-[![Version](https://img.shields.io/badge/version-1.0.13-blue.svg)](LXCPanel/manifest)
+[![Version](https://img.shields.io/badge/version-1.0.14-blue.svg)](LXCPanel/manifest)
 
 > 面向 [飞牛 fnOS](https://www.fnnas.com/) 的原生 LXC 管理应用：以 `.fpk` 安装包分发，**内嵌在飞牛桌面窗口内运行**（不弹新标签页），提供容器全生命周期管理、发行版模板创建、浏览器终端、实时资源曲线，以及**完整的 REST API** 供脚本与自动化调用。
 
@@ -484,6 +484,7 @@ SOFTWARE.
 
 ## 更新日志
 
+- **1.0.14**：版本升级与重新打包。
 - **1.0.13**：修复**改完 root 密码还是登不上**。根因是「写密码」和「能登录」被当成了一件事：① `chpasswd` 只看退出码，遇到 rootfs 只读、镜像不走 shadow 时会「成功返回但没写进去」，面板照样提示成功；② 即使密码真写进了 `/etc/shadow`，LXC 官方模板默认不带 `openssh-server`（SSH 直接 `Connection refused`），Debian / Ubuntu 的 sshd 又默认 `PermitRootLogin prohibit-password`（root 只能密钥登录），有的镜像还把 root 的 shell 改成 `nologin` 或把账号锁成 `!` 开头——这几种情况下密码怎么改都登不上。现在改密后**回读 `/etc/shadow` 比对哈希**，没变直接报错并给出原因，写成了会显示用的算法（SHA-512 / yescrypt）。容器详情新增**检查登录**：逐项核对密码哈希、账号锁定、登录 shell、sshd 是否安装 / 在监听、`PermitRootLogin` 与 `PasswordAuthentication`，红色项写明具体原因并可直接「一键修好登录」——自动改回正常 shell、解锁 root、写入 `PermitRootLogin yes` / `PasswordAuthentication yes`（优先 drop-in，老版本走主配置并 `sshd -t` 校验、失败回滚）、生成 host key 并启动 sshd；缺 `openssh-server` 时询问后一键安装（apt / apk / dnf / yum / zypper）。改密成功后也会自动跑一次检查，把「写进去了但登不上」当场摊开。
 - **1.0.12**：修复**端口转发连不上**。原来的 DNAT 条件是 `! -i lo -p tcp --dport N`，看起来覆盖了所有接口，实际有三处缺口：① 宿主机自己访问 `127.0.0.1:端口` 走 OUTPUT 链，PREROUTING 根本不经过，本机测永远失败；② 没有 NAT 回环，DNAT 之后容器回包的源是自己的地址，客户端会丢弃，表现是「请求到了容器但浏览器一直转圈」；③ 容器同时有 IPv4 和 IPv6 时只生成了 IPv4 规则，从 IPv6 进来直接没有规则命中。现在 DNAT 改用 `-m addrtype --dst-type LOCAL` 命中「目标是本机的任意地址」（等价于 `0.0.0.0` 加宿主所有 IPv6），补了 `nat/OUTPUT`（`LXCPANEL-OUT`）与两条 hairpin SNAT，IPv4 / IPv6 双栈同时生成规则，并补 `ip6tables POSTROUTING MASQUERADE` 让 ULA 容器能回包给公网 IPv6；转发链每次同步都核对位置、顶到 FORWARD 第一位，避免被 Docker 的 DROP 压住。配套新增：规则列表显示「服务在听 / 服务未监听」（宿主机直连容器端口探测），每行 ✓ 按钮做**分层连通性检测**（容器直连 → 127.0.0.1 → 各网卡地址），直接指出断在哪一层；端口转发页顶部列出宿主全部 IPv4 / IPv6 入口地址与端口，点击即复制。
 - **1.0.11**：解决「**能 ping、`apt` 也能下，但 `curl https://…` 被 reset**」。这类问题不在容器网络配置上——桥接、转发、NAT、DNS 都是好的，断在 TLS 握手。两种成因分别处理：国际站点被阻断时，新增**容器出网代理**（面板里填 `http://10.0.3.1:7890` 直指宿主机 mihomo，写进 `/etc/environment`、apt、`profile.d`、`bashrc` 四处，新建与启动的容器自动带上，一键下发到所有运行中容器）；上行 MTU 偏小（PPPoE / VPN）导致 MSS 黑洞时，自动加 `TCPMSS` 钳制规则并在体检里单列一项。网络诊断同时升级：新增 **HTTPS 国内 / 国际双探测**与代理落点检查，能一眼分清「整条网络不通」和「某个站点被重置」，诊断结果也从一段纯文本改成按项着色的卡片。
